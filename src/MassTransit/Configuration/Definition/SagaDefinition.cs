@@ -2,6 +2,7 @@ namespace MassTransit.Definition
 {
     using System;
     using Registration;
+    using Registration.Sagas;
     using Saga;
 
 

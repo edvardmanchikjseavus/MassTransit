@@ -4,6 +4,7 @@ namespace MassTransit.Definition
     using ConsumeConfigurators;
     using Courier;
     using Registration;
+    using Registration.Activities;
 
 
     public class ExecuteActivityDefinition<TActivity, TArguments> :

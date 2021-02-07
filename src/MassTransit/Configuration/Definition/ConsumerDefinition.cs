@@ -3,6 +3,7 @@ namespace MassTransit.Definition
     using System;
     using ConsumeConfigurators;
     using Registration;
+    using Registration.Consumers;
 
 
     /// <summary>

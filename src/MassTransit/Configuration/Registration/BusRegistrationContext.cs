@@ -3,8 +3,13 @@ namespace MassTransit.Registration
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using Activities;
+    using Consumers;
     using Definition;
+    using Endpoints;
+    using Futures;
     using Monitoring.Health;
+    using Sagas;
 
 
     public class BusRegistrationContext :
@@ -16,8 +21,9 @@ namespace MassTransit.Registration
 
         public BusRegistrationContext(IConfigurationServiceProvider provider, BusHealth busHealth, IRegistrationCache<IEndpointRegistration> endpoints,
             IRegistrationCache<IConsumerRegistration> consumers, IRegistrationCache<ISagaRegistration> sagas,
-            IRegistrationCache<IExecuteActivityRegistration> executeActivities, IRegistrationCache<IActivityRegistration> activities)
-            : base(provider, consumers, sagas, executeActivities, activities)
+            IRegistrationCache<IExecuteActivityRegistration> executeActivities, IRegistrationCache<IActivityRegistration> activities,
+            IRegistrationCache<IFutureRegistration> futures)
+            : base(provider, consumers, sagas, executeActivities, activities, futures)
         {
             _busHealth = busHealth;
             _endpoints = endpoints;
@@ -77,6 +83,12 @@ namespace MassTransit.Registration
                 .GroupBy(x => x.GetExecuteEndpointName(endpointNameFormatter))
                 .ToList();
 
+            List<IGrouping<string, IFutureDefinition>> futuresByEndpoint = Futures.Values
+                .Where(x => registrationFilter.Matches(x) && !WasConfigured(x.FutureType))
+                .Select(x => x.GetDefinition(this))
+                .GroupBy(x => x.GetEndpointName(endpointNameFormatter))
+                .ToList();
+
             var endpointsWithName = _endpoints.Values
                 .Select(x => x.GetDefinition(this))
                 .Select(x => new
@@ -95,6 +107,7 @@ namespace MassTransit.Registration
                 .Union(sagasByEndpoint.Select(x => x.Key))
                 .Union(activitiesByExecuteEndpoint.Select(x => x.Key))
                 .Union(executeActivitiesByEndpoint.Select(x => x.Key))
+                .Union(futuresByEndpoint.Select(x => x.Key))
                 .Union(endpointsWithName.Select(x => x.Name))
                 .Except(activitiesByCompensateEndpoint.Select(x => x.Key));
 
@@ -108,12 +121,15 @@ namespace MassTransit.Registration
                 from a in aes.DefaultIfEmpty()
                 join ea in executeActivitiesByEndpoint on e equals ea.Key into eas
                 from ea in eas.DefaultIfEmpty()
+                join f in futuresByEndpoint on e equals f.Key into fs
+                from f in fs.DefaultIfEmpty()
                 join ep in endpointsWithName on e equals ep.Name into eps
                 from ep in eps.Select(x => x.Definition)
                     .DefaultIfEmpty(c?.Select(x => (IEndpointDefinition)new DelegateEndpointDefinition(e, x, x.EndpointDefinition)).Combine()
                         ?? s?.Select(x => (IEndpointDefinition)new DelegateEndpointDefinition(e, x, x.EndpointDefinition)).Combine()
                         ?? a?.Select(x => (IEndpointDefinition)new DelegateEndpointDefinition(e, x, x.ExecuteEndpointDefinition)).Combine()
                         ?? ea?.Select(x => (IEndpointDefinition)new DelegateEndpointDefinition(e, x, x.ExecuteEndpointDefinition)).Combine()
+                        ?? f?.Select(x => (IEndpointDefinition)new DelegateEndpointDefinition(e, x, x.EndpointDefinition)).Combine()
                         ?? new NamedEndpointDefinition(e))
                 select new
                 {
@@ -122,7 +138,8 @@ namespace MassTransit.Registration
                     Consumers = c,
                     Sagas = s,
                     Activities = a,
-                    ExecuteActivities = ea
+                    ExecuteActivities = ea,
+                    Futures = f
                 };
 
             foreach (var endpoint in endpoints)
@@ -171,6 +188,12 @@ namespace MassTransit.Registration
                     {
                         foreach (var activity in endpoint.ExecuteActivities)
                             ConfigureExecuteActivity(activity.ActivityType, cfg);
+                    }
+
+                    if (endpoint.Futures != null)
+                    {
+                        foreach (var future in endpoint.Futures)
+                            ConfigureFuture(future.FutureType, cfg);
                     }
                 });
             }

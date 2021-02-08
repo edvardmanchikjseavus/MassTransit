@@ -44,6 +44,35 @@ namespace MassTransit.Containers.Tests.FutureTests
             Assert.That(response.Message.Description, Contains.Substring("FryShake(2)"));
         }
 
+        [Test]
+        public async Task Should_fault()
+        {
+            var orderId = NewId.NextGuid();
+            var orderLineId = NewId.NextGuid();
+
+            var scope = Provider.CreateScope();
+
+            var client = scope.ServiceProvider.GetRequiredService<IRequestClient<OrderFryShake>>();
+
+            try
+            {
+                await client.GetResponse<FryShakeCompleted>(new
+                {
+                    OrderId = orderId,
+                    OrderLineId = orderLineId,
+                    Flavor = "Strawberry",
+                    Size = Size.Large
+                }, timeout: TestHarness.TestTimeout);
+
+                Assert.Fail("Should have thrown");
+            }
+            catch (RequestFaultException exception)
+            {
+                Assert.That(exception.Fault.Host, Is.Not.Null);
+                Assert.That(exception.Message, Contains.Substring("Strawberry is not available"));
+            }
+        }
+
         protected override void ConfigureServices(IServiceCollection collection)
         {
             collection.AddSingleton<IShakeMachine, ShakeMachine>();

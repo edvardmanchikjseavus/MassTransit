@@ -6,9 +6,9 @@ namespace MassTransit.Futures.Endpoints
     using MassTransit;
 
 
-    public class InitializerFaultEndpoint<TRequest, TFault, TInput> :
+    public class InitializerFaultEndpoint<TCommand, TFault, TInput> :
         IFaultEndpoint<TInput>
-        where TRequest : class
+        where TCommand : class
         where TFault : class
         where TInput : class
     {
@@ -24,7 +24,7 @@ namespace MassTransit.Futures.Endpoints
             InitializeContext<TFault> initializeContext;
             if (context.Message is Fault fault)
             {
-                var request = context.Instance.GetRequest<TRequest>();
+                var request = context.Instance.GetCommand<TCommand>();
 
                 context.SetFaulted(context.Instance.CorrelationId, fault.Timestamp);
 

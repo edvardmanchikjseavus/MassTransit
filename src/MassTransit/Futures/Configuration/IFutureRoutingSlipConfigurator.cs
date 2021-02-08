@@ -1,23 +1,44 @@
 namespace MassTransit.Futures
 {
     using System;
-    using Configurators;
     using Courier.Contracts;
 
 
-    public interface IFutureRoutingSlipConfigurator<TResponse, TFault, out TInput>
-        where TResponse : class
+    public interface IFutureRoutingSlipConfigurator<TResult, TFault, out TInput>
+        where TResult : class
         where TFault : class
         where TInput : class
     {
-        void Pending();
+        /// <summary>
+        /// If specified, the routing slip is added to the pending results, using the routing slip tracking
+        /// number. When the routing slip completes or faults, the pending result is completed or faulted.
+        /// </summary>
+        void TrackPendingRoutingSlip();
 
-        void Build(BuildItineraryCallback<TInput> buildItinerary);
+        /// <summary>
+        /// Builds the routing slip itinerary when the command is received. The routing slip builder
+        /// is passed, along with the <see cref="FutureConsumeContext{TInput}"/>. The tracking numbers,
+        /// subscriptions, and FutureId variables are already initialized.
+        /// </summary>
+        /// <param name="buildItinerary"></param>
+        void BuildItinerary(BuildItineraryCallback<TInput> buildItinerary);
 
-        void Plan();
+        /// <summary>
+        /// Builds the routing slip itinerary when the command is received using a container-registered
+        /// <see cref="IItineraryPlanner{TInput}"/>.
+        /// </summary>
+        void BuildUsingItineraryPlanner();
 
-        void Response(Action<IFutureResponseConfigurator<RoutingSlipCompleted, TResponse>> configure);
+        /// <summary>
+        /// Configure the behavior when the routing slip completes.
+        /// </summary>
+        /// <param name="configure"></param>
+        void OnRoutingSlipCompleted(Action<IFutureResultConfigurator<TResult, RoutingSlipCompleted>> configure);
 
-        void Fault(Action<IFutureFaultConfigurator<TFault, RoutingSlipFaulted>> configure);
+        /// <summary>
+        /// Configure what happens when the routing slip faults
+        /// </summary>
+        /// <param name="configure"></param>
+        void OnRoutingSlipFaulted(Action<IFutureFaultConfigurator<TFault, RoutingSlipFaulted>> configure);
     }
 }

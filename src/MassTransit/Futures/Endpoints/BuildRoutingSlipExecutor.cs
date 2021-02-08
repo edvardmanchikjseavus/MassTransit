@@ -1,21 +1,23 @@
-namespace MassTransit.Futures.Configurators
+namespace MassTransit.Futures.Endpoints
 {
     using System.Threading.Tasks;
-    using Automatonymous.Activities;
     using Courier;
     using Courier.Contracts;
 
 
-    public class PlanRoutingSlipExecutor<TInput> :
+    public class BuildRoutingSlipExecutor<TInput> :
         IRoutingSlipExecutor<TInput>
         where TInput : class
     {
+        readonly BuildItineraryCallback<TInput> _buildItinerary;
+
+        public BuildRoutingSlipExecutor(BuildItineraryCallback<TInput> buildItinerary)
+        {
+            _buildItinerary = buildItinerary;
+        }
+
         public async Task Execute(FutureConsumeContext<TInput> context)
         {
-            var factory = context.GetStateMachineActivityFactory();
-
-            IItineraryPlanner<TInput> itineraryPlanner = factory.GetService<IItineraryPlanner<TInput>>(context);
-
             var trackingNumber = NewId.NextGuid();
 
             var builder = new RoutingSlipBuilder(trackingNumber);
@@ -24,16 +26,16 @@ namespace MassTransit.Futures.Configurators
 
             builder.AddSubscription(context.ReceiveContext.InputAddress, RoutingSlipEvents.Completed | RoutingSlipEvents.Faulted);
 
-            await itineraryPlanner.PlanItinerary(context, builder).ConfigureAwait(false);
+            await _buildItinerary(context, builder).ConfigureAwait(false);
 
             var routingSlip = builder.Build();
 
             await context.Execute(routingSlip).ConfigureAwait(false);
 
-            if (Pending)
+            if (TrackRoutingSlip)
                 context.Instance.Pending.Add(trackingNumber);
         }
 
-        public bool Pending { get; set; }
+        public bool TrackRoutingSlip { get; set; }
     }
 }

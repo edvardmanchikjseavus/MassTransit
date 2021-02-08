@@ -38,6 +38,9 @@ namespace MassTransit.Containers.Tests.FutureTests
             Assert.That(response.Message.OrderLineId, Is.EqualTo(orderLineId));
             Assert.That(response.Message.Created, Is.GreaterThan(startedAt));
             Assert.That(response.Message.Completed, Is.GreaterThan(response.Message.Created));
+
+            Assert.That(response.Message.Description, Contains.Substring("Fries"));
+            Assert.That(response.Message.Description, Contains.Substring("Shake"));
         }
 
         protected override void ConfigureServices(IServiceCollection collection)

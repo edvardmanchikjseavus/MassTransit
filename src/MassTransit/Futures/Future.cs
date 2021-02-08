@@ -14,64 +14,66 @@ namespace MassTransit.Futures
     using Internals;
     using MassTransit.Configurators;
 
-    // ReSharper disable MemberCanBePrivate.Global
-    // ReSharper disable MemberCanBeProtected.Global
-    // ReSharper disable UnusedAutoPropertyAccessor.Global
 
-    public abstract class Future<TRequest, TResponse, TFault> :
-        MassTransitStateMachine<FutureState>
-        where TRequest : class
-        where TResponse : class
+    /// <summary>
+    /// A future is a deterministic, durable service that given a command, executes any number
+    /// of requests, routing slips, functions, etc. to produce a result. Once the result has been set,
+    /// it is available to any subsequent commands and requests for the result.
+    /// </summary>
+    /// <typeparam name="TCommand">The command type that creates the future</typeparam>
+    /// <typeparam name="TResult">The result type that completes the future</typeparam>
+    /// <typeparam name="TFault">The fault type that faults the future</typeparam>
+    public abstract class Future<TCommand, TResult, TFault> :
+        MassTransitStateMachine<FutureState>,
+        IFutureStateMachineConfigurator
+        where TCommand : class
+        where TResult : class
         where TFault : class
     {
         readonly FutureFault<TFault> _fault = new FutureFault<TFault>();
-        readonly FutureResponse<TRequest, TResponse> _response = new FutureResponse<TRequest, TResponse>();
+        readonly FutureResult<TCommand, TResult> _result = new FutureResult<TCommand, TResult>();
 
         protected Future()
         {
             InstanceState(x => x.CurrentState, WaitingForCompletion, Completed, Faulted);
 
-            Event(() => FutureRequested, x => x.CorrelateById(context => CorrelationIdOrFault(context)));
-
-            Event(() => ResponseRequested, e =>
+            Event(() => ResultRequested, e =>
             {
                 e.CorrelateById(x => x.Message.CorrelationId);
-
-                e.OnMissingInstance(x => x.Execute(context => throw new FutureNotFoundException(typeof(TRequest), context.Message.CorrelationId)));
-
+                e.OnMissingInstance(x => x.Execute(context => throw new FutureNotFoundException(typeof(TCommand), context.Message.CorrelationId)));
                 e.ConfigureConsumeTopology = false;
             });
 
             Initially(
-                When(FutureRequested)
+                When(CommandReceived)
                     .InitializeFuture()
                     .TransitionTo(WaitingForCompletion)
             );
 
             During(WaitingForCompletion,
-                When(FutureRequested)
+                When(CommandReceived)
                     .AddSubscription(),
-                When(ResponseRequested)
+                When(ResultRequested)
                     .AddSubscription()
             );
 
             During(Completed,
-                When(FutureRequested)
-                    .RespondAsync(x => GetCompleted(x)),
-                When(ResponseRequested)
-                    .RespondAsync(x => GetCompleted(x))
+                When(CommandReceived)
+                    .RespondAsync(x => GetResult(x)),
+                When(ResultRequested)
+                    .RespondAsync(x => GetResult(x))
             );
 
             During(Faulted,
-                When(FutureRequested)
-                    .RespondAsync(x => GetFaulted(x)),
-                When(ResponseRequested)
-                    .RespondAsync(x => GetFaulted(x))
+                When(CommandReceived)
+                    .RespondAsync(x => GetFault(x)),
+                When(ResultRequested)
+                    .RespondAsync(x => GetFault(x))
             );
 
-            Fault(x => x.Init(context =>
+            WhenAnyFaulted(x => x.SetFaultedUsingInitializer(context =>
             {
-                var message = context.Instance.GetRequest<TRequest>();
+                var message = context.Instance.GetCommand<TCommand>();
 
                 // use supported message types to deserialize results...
 
@@ -94,51 +96,76 @@ namespace MassTransit.Futures
             }));
         }
 
+        // States
+        // ReSharper disable MemberCanBePrivate.Global
+        // ReSharper disable UnusedAutoPropertyAccessor.Global
         public State WaitingForCompletion { get; protected set; }
         public State Completed { get; protected set; }
         public State Faulted { get; protected set; }
 
-        public Event<TRequest> FutureRequested { get; protected set; }
-        public Event<Get<TRequest>> ResponseRequested { get; protected set; }
+        // ReSharper disable once MemberCanBeProtected.Global
+        /// <summary>
+        /// Initiates and correlates the command to the future. Subsequent commands received while waiting for completion
+        /// are added as subscribers.
+        /// </summary>
+        public Event<TCommand> CommandReceived { get; protected set; }
+
+        /// <summary>
+        /// Used by a Future Reference to get the future's result once completed or fault once faulted.
+        /// </summary>
+        public Event<Get<TCommand>> ResultRequested { get; protected set; }
+
+        /// <summary>
+        /// Configure the initiating command, including correlation, etc.
+        /// </summary>
+        /// <param name="configure"></param>
+        protected void ConfigureCommand(Action<IEventCorrelationConfigurator<FutureState, TCommand>> configure)
+        {
+            Event(() => CommandReceived, configurator =>
+            {
+                configure?.Invoke(configurator);
+            });
+        }
 
         /// <summary>
         /// Send a request when the future is requested
         /// </summary>
         /// <param name="configure"></param>
-        /// <typeparam name="TCommand">The request type to send</typeparam>
-        /// <typeparam name="TResult">The response type for the request</typeparam>
-        protected void SendRequest<TCommand, TResult>(Action<IFutureRequestConfigurator<TResponse, TFault, TRequest, TCommand, TResult>> configure)
-            where TCommand : class
-            where TResult : class
+        /// <typeparam name="TRequest">The request type to send</typeparam>
+        protected FutureRequestHandle<TCommand, TResult, TFault, TRequest>
+            SendRequest<TRequest>(Action<IFutureRequestConfigurator<TFault, TCommand, TRequest>> configure = default)
+            where TRequest : class
         {
-            IFutureRequest<TRequest> request = CreateRequest<TCommand, TResult>(configure);
+            FutureRequestConfigurator<TCommand, TResult, TFault, TCommand, TRequest> request = CreateFutureRequest(configure);
 
             Initially(
-                When(FutureRequested)
+                When(CommandReceived)
                     .ThenAsync(context => request.Send(context))
             );
+
+            return request;
         }
 
         /// <summary>
-        /// Send a request when the future is requested, using a request property as the source
+        /// Send a request when the future is requested
         /// </summary>
-        /// <param name="inputSelector"></param>
+        /// <param name="inputSelector">Specify an input property from the command to use as the input for the request</param>
         /// <param name="configure"></param>
-        /// <typeparam name="TCommand">The request type to send</typeparam>
-        /// <typeparam name="TResult">The response type for the request</typeparam>
-        /// <typeparam name="TInput">The input property type</typeparam>
-        protected void SendRequest<TInput, TCommand, TResult>(Func<TRequest, TInput> inputSelector,
-            Action<IFutureRequestConfigurator<TResponse, TFault, TInput, TCommand, TResult>> configure)
+        /// <typeparam name="TRequest">The request type to send</typeparam>
+        /// <typeparam name="TInput">The input type</typeparam>
+        protected FutureRequestHandle<TCommand, TResult, TFault, TRequest> SendRequest<TInput, TRequest>(Func<TCommand, TInput> inputSelector,
+            Action<IFutureRequestConfigurator<TFault, TInput, TRequest>> configure = default)
             where TInput : class
-            where TCommand : class
-            where TResult : class
+            where TRequest : class
         {
-            IFutureRequest<TRequest, TInput> request = CreateRequest(configure);
+            FutureRequestConfigurator<TCommand, TResult, TFault, TInput, TRequest> request = CreateFutureRequest(configure);
 
             Initially(
-                When(FutureRequested)
+                When(CommandReceived)
                     .ThenAsync(context => request.Send(context, inputSelector(context.Data)))
             );
+
+            return request;
         }
 
         /// <summary>
@@ -146,256 +173,135 @@ namespace MassTransit.Futures
         /// </summary>
         /// <param name="inputSelector"></param>
         /// <param name="configure"></param>
-        /// <typeparam name="TCommand">The request type to send</typeparam>
-        /// <typeparam name="TResult">The response type for the request</typeparam>
+        /// <typeparam name="TRequest">The request type to send</typeparam>
         /// <typeparam name="TInput">The input property type</typeparam>
-        protected void SendRequests<TInput, TCommand, TResult>(Func<TRequest, IEnumerable<TInput>> inputSelector,
-            Action<IFutureRequestConfigurator<TResponse, TFault, TInput, TCommand, TResult>> configure)
+        protected FutureRequestHandle<TCommand, TResult, TFault, TRequest> SendRequests<TInput, TRequest>(Func<TCommand, IEnumerable<TInput>> inputSelector,
+            Action<IFutureRequestConfigurator<TFault, TInput, TRequest>> configure)
             where TInput : class
-            where TCommand : class
-            where TResult : class
+            where TRequest : class
         {
-            IFutureRequest<TRequest, TInput> futureRequest = CreateRequest(configure);
+            FutureRequestConfigurator<TCommand, TResult, TFault, TInput, TRequest> request = CreateFutureRequest(configure);
 
             Initially(
-                When(FutureRequested)
-                    .ThenAsync(context => futureRequest.Send(context, inputSelector(context.Data)))
+                When(CommandReceived)
+                    .ThenAsync(context => request.SendRange(context, inputSelector(context.Data)))
             );
-        }
 
-        /// <summary>
-        /// Create a request, which can be used to send requests
-        /// </summary>
-        /// <param name="configure"></param>
-        /// <typeparam name="TCommand">The request type to send</typeparam>
-        /// <typeparam name="TResult">The response type for the request</typeparam>
-        /// <returns></returns>
-        protected IFutureRequest<TRequest> CreateRequest<TCommand, TResult>(
-            Action<IFutureRequestConfigurator<TResponse, TFault, TRequest, TCommand, TResult>> configure)
-            where TCommand : class
-            where TResult : class
-        {
-            return CreateFutureRequest(configure);
-        }
-
-        /// <summary>
-        /// Create a request, which can be used to send requests
-        /// </summary>
-        /// <param name="configure"></param>
-        /// <typeparam name="TCommand">The request type to send</typeparam>
-        /// <typeparam name="TResult">The response type for the request</typeparam>
-        /// <typeparam name="TInput">The input property type</typeparam>
-        /// <returns></returns>
-        protected IFutureRequest<TRequest, TInput> CreateRequest<TInput, TCommand, TResult>(
-            Action<IFutureRequestConfigurator<TResponse, TFault, TInput, TCommand, TResult>> configure)
-            where TInput : class
-            where TCommand : class
-            where TResult : class
-        {
-            return CreateFutureRequest(configure);
+            return request;
         }
 
         /// <summary>
         /// Execute a routing slip when the future is requested
         /// </summary>
         /// <param name="configure"></param>
-        protected void ExecuteRoutingSlip(Action<IFutureRoutingSlipConfigurator<TResponse, TFault, TRequest>> configure)
+        protected FutureRoutingSlipHandle ExecuteRoutingSlip(Action<IFutureRoutingSlipConfigurator<TResult, TFault, TCommand>> configure)
         {
-            IFutureRoutingSlip<TRequest> request = CreateRoutingSlip(configure);
+            FutureRoutingSlipConfigurator<TCommand, TResult, TFault, TCommand> routingSlip = CreateFutureRoutingSlip(configure);
 
             Initially(
-                When(FutureRequested)
-                    .ThenAsync(context => request.Execute(context))
+                When(CommandReceived)
+                    .ThenAsync(context => routingSlip.Execute(context))
             );
+
+            return routingSlip;
         }
 
-        /// <summary>
-        /// Create a routing slip executor
-        /// </summary>
-        /// <param name="configure"></param>
-        /// <returns></returns>
-        protected IFutureRoutingSlip<TRequest> CreateRoutingSlip(Action<IFutureRoutingSlipConfigurator<TResponse, TFault, TRequest>> configure)
-        {
-            return CreateFutureRoutingSlip(configure);
-        }
-
-        /// <summary>
-        /// Create a routing slip executor
-        /// </summary>
-        /// <param name="configure"></param>
-        /// <typeparam name="TInput">The input property type</typeparam>
-        /// <returns></returns>
-        protected IFutureRoutingSlip<TInput> CreateRoutingSlip<TInput>(Action<IFutureRoutingSlipConfigurator<TResponse, TFault, TInput>> configure)
+        FutureRequestConfigurator<TCommand, TResult, TFault, TInput, TRequest> CreateFutureRequest<TInput, TRequest>(
+            Action<IFutureRequestConfigurator<TFault, TInput, TRequest>> configure)
             where TInput : class
+            where TRequest : class
         {
-            return CreateFutureRoutingSlip(configure);
-        }
-
-        FutureRequest<TRequest, TResponse, TFault, TInput, TCommand, TResult> CreateFutureRequest<TInput, TCommand, TResult>(
-            Action<IFutureRequestConfigurator<TResponse, TFault, TInput, TCommand, TResult>> configure)
-            where TCommand : class
-            where TResult : class
-            where TInput : class
-        {
-            var futureRequest = new FutureRequest<TRequest, TResponse, TFault, TInput, TCommand, TResult>();
-
-            configure?.Invoke(futureRequest);
-
-            BusConfigurationResult.CompileResults(futureRequest.Validate(), $"The future was not configured correctly: {TypeCache.GetShortName(GetType())}");
-
-            if (futureRequest.HasResponse(out FutureResponse<TRequest, TResult, TResponse> response))
+            Event<Fault<TRequest>> requestFaulted = Event<Fault<TRequest>>(FormatEventName<TRequest>() + "Faulted", x =>
             {
-                var eventName = FormatEventName<TResult>();
+                x.CorrelateById(m => RequestIdOrFault(m));
+                x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), RequestIdOrDefault(context))));
+                x.ConfigureConsumeTopology = false;
+            });
 
-                Event<TResult> requestCompleted = Event<TResult>(eventName, x =>
-                {
-                    x.CorrelateById(m => RequestIdOrFault(m));
+            var request = new FutureRequestConfigurator<TCommand, TResult, TFault, TInput, TRequest>(this, requestFaulted);
 
-                    x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), RequestIdOrDefault(context))));
-                    x.ConfigureConsumeTopology = false;
-                });
+            configure?.Invoke(request);
 
-                DuringAny(
-                    When(requestCompleted)
-                        .ThenAsync(context => response.SetCompleted(context))
-                        .TransitionTo(Completed)
-                );
+            BusConfigurationResult.CompileResults(request.Validate(), $"The future request was not configured correctly: {TypeCache.GetShortName(GetType())}");
 
-                eventName = FormatEventName<TCommand>();
-
-                Event<Fault<TCommand>> requestFaulted = Event<Fault<TCommand>>(eventName + "Faulted", x =>
-                {
-                    x.CorrelateById(m => RequestIdOrFault(m));
-
-                    x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), RequestIdOrDefault(context))));
-                    x.ConfigureConsumeTopology = false;
-                });
-
-                if (futureRequest.HasFault(out FutureFault<TRequest, TFault, Fault<TCommand>> fault))
-                {
-                    DuringAny(
-                        When(requestFaulted)
-                            .ThenAsync(context => fault.SetFaulted(context))
-                            .TransitionTo(Faulted)
-                    );
-                }
-                else
-                {
-                    DuringAny(
-                        When(requestFaulted)
-                            .ThenAsync(context => _fault.SetFaulted(context))
-                            .TransitionTo(Faulted)
-                    );
-                }
-            }
+            if (request.PendingRequestIdProvider != null)
+                FaultPendingRequest(requestFaulted, request.PendingRequestIdProvider);
             else
-            {
-                CompleteEvent(futureRequest.ResultIdProvider);
-                FaultEvent(futureRequest.CommandIdProvider);
-            }
+                SetFaulted(requestFaulted, request.SetFaulted);
 
-            return futureRequest;
+            return request;
         }
 
-        FutureRoutingSlip<TRequest, TResponse, TFault, TInput> CreateFutureRoutingSlip<TInput>(
-            Action<IFutureRoutingSlipConfigurator<TResponse, TFault, TInput>> configure)
+        FutureRoutingSlipConfigurator<TCommand, TResult, TFault, TInput> CreateFutureRoutingSlip<TInput>(
+            Action<IFutureRoutingSlipConfigurator<TResult, TFault, TInput>> configure)
             where TInput : class
         {
-            var routingSlip = new FutureRoutingSlip<TRequest, TResponse, TFault, TInput>();
+            Event<RoutingSlipCompleted> routingSlipCompleted = Event<RoutingSlipCompleted>(FormatEventName<RoutingSlipCompleted>(), x =>
+            {
+                x.CorrelateById(m => FutureIdOrFault(m.Message.Variables));
+                x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), FutureIdOrDefault(context.Message.Variables))));
+                x.ConfigureConsumeTopology = false;
+            });
+
+            Event<RoutingSlipFaulted> routingSlipFaulted = Event<RoutingSlipFaulted>(FormatEventName<RoutingSlipFaulted>(), x =>
+            {
+                x.CorrelateById(m => FutureIdOrFault(m.Message.Variables));
+                x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), FutureIdOrDefault(context.Message.Variables))));
+                x.ConfigureConsumeTopology = false;
+            });
+
+            var routingSlip = new FutureRoutingSlipConfigurator<TCommand, TResult, TFault, TInput>(routingSlipCompleted, routingSlipFaulted);
 
             configure?.Invoke(routingSlip);
 
             BusConfigurationResult.CompileResults(routingSlip.Validate(), $"The future was not configured correctly: {TypeCache.GetShortName(GetType())}");
 
-            var eventName = FormatEventName<RoutingSlipCompleted>();
-
-            Event<RoutingSlipCompleted> requestCompleted = Event<RoutingSlipCompleted>(eventName, x =>
-            {
-                x.CorrelateById(m => FutureIdOrFault(m.Message.Variables));
-
-                x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), FutureIdOrDefault(context.Message.Variables))));
-                x.ConfigureConsumeTopology = false;
-            });
-
-            eventName = FormatEventName<RoutingSlipFaulted>();
-
-            Event<RoutingSlipFaulted> requestFaulted = Event<RoutingSlipFaulted>(eventName, x =>
-            {
-                x.CorrelateById(m => FutureIdOrFault(m.Message.Variables));
-
-                x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), FutureIdOrDefault(context.Message.Variables))));
-                x.ConfigureConsumeTopology = false;
-            });
-
-            if (routingSlip.HasResponse(out FutureResponse<TRequest, RoutingSlipCompleted, TResponse> response))
-            {
-                DuringAny(
-                    When(requestCompleted)
-                        .ThenAsync(context => response.SetCompleted(context))
-                        .TransitionTo(Completed)
-                );
-
-                if (routingSlip.HasFault(out FutureFault<TRequest, TFault, RoutingSlipFaulted> fault))
-                {
-                    DuringAny(
-                        When(requestFaulted)
-                            .ThenAsync(context => fault.SetFaulted(context))
-                            .TransitionTo(Faulted)
-                    );
-                }
-                else
-                {
-                    DuringAny(
-                        When(requestFaulted)
-                            .ThenAsync(context => _fault.SetFaulted(context))
-                            .TransitionTo(Faulted)
-                    );
-                }
-            }
+            if (routingSlip.FaultedIdProvider != null)
+                FaultPendingRoutingSlip(routingSlipFaulted);
             else
             {
-                DuringAny(
-                    When(requestCompleted)
-                        .SetResult(x => routingSlip.ResultIdProvider(x.Message), x => x.Message)
-                        .IfElse(context => context.Instance.Completed.HasValue,
-                            completed => completed
-                                .ThenAsync(context => _response.SetCompleted(context))
-                                .TransitionTo(Completed),
-                            notCompleted => notCompleted.If(context => context.Instance.Faulted.HasValue,
-                                faulted => faulted
-                                    .ThenAsync(context => _fault.SetFaulted(context))
-                                    .TransitionTo(Faulted))),
-                When(requestFaulted)
-                    .SetFault(x => x.Message)
-                    .If(context => context.Instance.Faulted.HasValue,
-                        faulted => faulted
-                            .ThenAsync(context => _fault.SetFaulted(context))
-                            .TransitionTo(Faulted))
-                );
+                if (routingSlip.HasFault(out FutureFault<TCommand, TFault, RoutingSlipFaulted> fault))
+                    SetFaulted(routingSlipFaulted, fault.SetFaulted);
+                else
+                    SetFaulted(routingSlipFaulted, _fault.SetFaulted);
             }
+
+            if (routingSlip.CompletedIdProvider != null)
+                CompletePending(routingSlipCompleted, routingSlip.CompletedIdProvider);
+            else if (routingSlip.HasResult(out FutureResult<TCommand, RoutingSlipCompleted, TResult> result))
+                SetResult(routingSlipCompleted, result.SetResult);
 
             return routingSlip;
         }
 
-        protected void CompleteEvent<T>(PendingIdProvider<T> pendingIdProvider)
+        Event<T> IFutureStateMachineConfigurator.CreateResponseEvent<T>()
             where T : class
         {
-            var eventName = FormatEventName<T>();
-
-            Event<T> requestCompleted = Event<T>(eventName, x =>
+            Event<T> requestCompleted = Event<T>(FormatEventName<T>(), x =>
             {
                 x.CorrelateById(m => RequestIdOrFault(m));
-
                 x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), RequestIdOrDefault(context))));
                 x.ConfigureConsumeTopology = false;
             });
 
+            return requestCompleted;
+        }
+
+        void IFutureStateMachineConfigurator.CompletePendingRequest<T>(Event<T> requestCompleted, PendingIdProvider<T> pendingIdProvider)
+            where T : class
+        {
+            CompletePending(requestCompleted, pendingIdProvider);
+        }
+
+        void CompletePending<T>(Event<T> completedEvent, PendingIdProvider<T> pendingIdProvider)
+            where T : class
+        {
             DuringAny(
-                When(requestCompleted)
+                When(completedEvent)
                     .SetResult(x => pendingIdProvider(x.Message), x => x.Message)
                     .IfElse(context => context.Instance.Completed.HasValue,
                         completed => completed
-                            .ThenAsync(context => _response.SetCompleted(context))
+                            .ThenAsync(context => _result.SetResult(context))
                             .TransitionTo(Completed),
                         notCompleted => notCompleted.If(context => context.Instance.Faulted.HasValue,
                             faulted => faulted
@@ -404,19 +310,9 @@ namespace MassTransit.Futures
             );
         }
 
-        protected void FaultEvent<T>(PendingIdProvider<T> pendingIdProvider)
+        public void FaultPendingRequest<T>(Event<Fault<T>> requestFaulted, PendingIdProvider<T> pendingIdProvider)
             where T : class
         {
-            var eventName = FormatEventName<T>() + "Faulted";
-
-            Event<Fault<T>> requestFaulted = Event<Fault<T>>(eventName, x =>
-            {
-                x.CorrelateById(m => RequestIdOrFault(m));
-
-                x.OnMissingInstance(m => m.Execute(context => throw new FutureNotFoundException(GetType(), RequestIdOrDefault(context))));
-                x.ConfigureConsumeTopology = false;
-            });
-
             DuringAny(
                 When(requestFaulted)
                     .SetFault(x => pendingIdProvider(x.Message.Message), x => x.Message)
@@ -424,6 +320,45 @@ namespace MassTransit.Futures
                         faulted => faulted
                             .ThenAsync(context => _fault.SetFaulted(context))
                             .TransitionTo(Faulted))
+            );
+        }
+
+        void FaultPendingRoutingSlip(Event<RoutingSlipFaulted> requestFaulted)
+        {
+            DuringAny(
+                When(requestFaulted)
+                    .SetFault(x => x.Message)
+                    .If(context => context.Instance.Faulted.HasValue,
+                        faulted => faulted
+                            .ThenAsync(context => _fault.SetFaulted(context))
+                            .TransitionTo(Faulted))
+            );
+        }
+
+        void IFutureStateMachineConfigurator.SetResult<T>(Event<T> responseReceived,
+            Func<BehaviorContext<FutureState, T>, Task> callback)
+            where T : class
+        {
+            SetResult(responseReceived, callback);
+        }
+
+        void SetResult<T>(Event<T> resultEvent, Func<BehaviorContext<FutureState, T>, Task> callback)
+            where T : class
+        {
+            DuringAny(
+                When(resultEvent)
+                    .ThenAsync(context => callback(context))
+                    .TransitionTo(Completed)
+            );
+        }
+
+        public void SetFaulted<T>(Event<T> faultEvent, Func<BehaviorContext<FutureState, T>, Task> callback)
+            where T : class
+        {
+            DuringAny(
+                When(faultEvent)
+                    .ThenAsync(context => callback(context))
+                    .TransitionTo(Faulted)
             );
         }
 
@@ -456,34 +391,33 @@ namespace MassTransit.Futures
             return variables.TryGetValue(nameof(FutureConsumeContext.FutureId), out Guid correlationId) ? correlationId : default;
         }
 
-        protected static Guid CorrelationIdOrFault(MessageContext context)
+        protected void WhenAllCompleted(Action<IFutureResultConfigurator<TResult>> configure)
         {
-            return context.CorrelationId ?? throw new RequestException("CorrelationId not present, define the request correlation using Event");
-        }
-
-        protected void Response(Action<IFutureResponseConfigurator<TResponse>> configure)
-        {
-            var configurator = new FutureResponseConfigurator<TRequest, TResponse>(_response);
+            var configurator = new FutureResultConfigurator<TCommand, TResult>(_result);
 
             configure?.Invoke(configurator);
         }
 
-        protected void Fault(Action<IFutureFaultConfigurator<TFault>> configure)
+        /// <summary>
+        /// When any result faulted, Set the future Faulted
+        /// </summary>
+        /// <param name="configure"></param>
+        protected void WhenAnyFaulted(Action<IFutureFaultConfigurator<TFault>> configure)
         {
             var configurator = new FutureFaultConfigurator<TFault>(_fault);
 
             configure?.Invoke(configurator);
         }
 
-        protected Task<TResponse> GetCompleted(EventContext<FutureState> context)
+        static Task<TResult> GetResult(InstanceContext<FutureState> context)
         {
-            if (context.Instance.TryGetResult(context.Instance.CorrelationId, out TResponse completed))
+            if (context.Instance.TryGetResult(context.Instance.CorrelationId, out TResult completed))
                 return Task.FromResult(completed);
 
             throw new InvalidOperationException("Completed result not available");
         }
 
-        protected Task<TFault> GetFaulted(EventContext<FutureState> context)
+        static Task<TFault> GetFault(InstanceContext<FutureState> context)
         {
             if (context.Instance.TryGetFault(context.Instance.CorrelationId, out TFault faulted))
                 return Task.FromResult(faulted);
@@ -491,14 +425,6 @@ namespace MassTransit.Futures
             throw new InvalidOperationException("Faulted result not available");
         }
     }
-
-
-    /*
-     * *- CorrelationId - identifies the future
-    - Location - where to communicate with the future
-    - Type - the completed future type
-    - FaultType - the faulted future type
-     */
 
 
     public abstract class Future<TRequest, TResponse> :

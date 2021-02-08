@@ -29,25 +29,27 @@ namespace MassTransit.Futures.Internals
             return new MassTransitFutureConsumeContext(context, context.GetPayload<ConsumeContext>());
         }
 
-        public static async Task SendMessageToSubscriptions<T>(this FutureConsumeContext context, IEnumerable<FutureSubscription> subscriptions,
+        public static async Task<T> SendMessageToSubscriptions<T>(this FutureConsumeContext context, IEnumerable<FutureSubscription> subscriptions,
             IMessageInitializer<T> initializer, InitializeContext<T> initializeContext, object values)
             where T : class
         {
-            List<Task> tasks = subscriptions.Select(async sub =>
+            List<Task<T>> tasks = subscriptions.Select(async sub =>
             {
                 var endpoint = await context.GetSendEndpoint(sub.Address).ConfigureAwait(false);
 
                 if (sub.RequestId.HasValue)
                 {
-                    var pipe = new FutureResponsePipe<T>(sub.RequestId.Value);
+                    var pipe = new FutureResultPipe<T>(sub.RequestId.Value);
 
-                    await initializer.Send(endpoint, initializeContext, values, pipe).ConfigureAwait(false);
+                    return await initializer.Send(endpoint, initializeContext, values, pipe).ConfigureAwait(false);
                 }
-                else
-                    await initializer.Send(endpoint, initializeContext, values).ConfigureAwait(false);
+
+                return await initializer.Send(endpoint, initializeContext, values).ConfigureAwait(false);
             }).ToList();
 
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            T[] messages = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            return messages.FirstOrDefault();
         }
 
         public static async Task SendMessageToSubscriptions<T>(this FutureConsumeContext context, IEnumerable<FutureSubscription> subscriptions, T message)
@@ -59,7 +61,7 @@ namespace MassTransit.Futures.Internals
 
                 if (sub.RequestId.HasValue)
                 {
-                    var pipe = new FutureResponsePipe<T>(sub.RequestId.Value);
+                    var pipe = new FutureResultPipe<T>(sub.RequestId.Value);
 
                     await endpoint.Send(message, pipe, context.CancellationToken).ConfigureAwait(false);
                 }

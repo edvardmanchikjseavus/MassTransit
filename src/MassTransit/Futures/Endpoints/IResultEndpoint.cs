@@ -3,14 +3,14 @@ namespace MassTransit.Futures.Endpoints
     using System.Threading.Tasks;
 
 
-    public interface IResponseEndpoint<in TResult>
+    public interface IResultEndpoint<in TResult>
         where TResult : class
     {
         Task SendResponse(FutureConsumeContext<TResult> context, params FutureSubscription[] subscriptions);
     }
 
 
-    public interface IResponseEndpoint
+    public interface IResultEndpoint
     {
         Task SendResponse(FutureConsumeContext context, params FutureSubscription[] subscriptions);
     }

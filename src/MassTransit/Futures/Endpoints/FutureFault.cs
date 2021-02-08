@@ -4,32 +4,22 @@ namespace MassTransit.Futures.Endpoints
     using System.Linq;
     using System.Threading.Tasks;
     using Automatonymous;
+    using Configurators;
     using GreenPipes;
     using Internals;
 
 
-    public class FutureFault<TRequest, TFault, TInput> :
+    public class FutureFault<TCommand, TFault, TInput> :
         ISpecification
-        where TRequest : class
+        where TCommand : class
         where TFault : class
         where TInput : class
     {
-        static readonly Default _default = new Default();
         IFaultEndpoint<TInput> _endpoint;
 
         public FutureFault()
         {
-            _endpoint = new InitializerFaultEndpoint<TRequest, TFault, TInput>(DefaultProvider);
-        }
-
-        public AsyncFutureMessageFactory<TInput, TFault> Factory
-        {
-            set => _endpoint = new FactoryFaultEndpoint<TInput, TFault>(value);
-        }
-
-        public InitializerValueProvider<TInput> Initializer
-        {
-            set => _endpoint = new InitializerFaultEndpoint<TRequest, TFault, TInput>(value);
+            _endpoint = new InitializerFaultEndpoint<TCommand, TFault, TInput>(FutureConfiguratorHelpers.DefaultProvider);
         }
 
         public IEnumerable<ValidationResult> Validate()
@@ -38,28 +28,23 @@ namespace MassTransit.Futures.Endpoints
                 yield return this.Failure("Fault", "Factory", "Init or Create must be configured");
         }
 
-        static object DefaultProvider(FutureConsumeContext<TInput> context)
+        public void SetFaultedUsingInitializer(InitializerValueProvider<TInput> value)
         {
-            return _default;
+            _endpoint = new InitializerFaultEndpoint<TCommand, TFault, TInput>(value);
+        }
+
+        public void SetFaultedUsingFactory(AsyncFutureMessageFactory<TInput, TFault> value)
+        {
+            _endpoint = new FactoryFaultEndpoint<TInput, TFault>(value);
         }
 
         public Task SetFaulted(BehaviorContext<FutureState, TInput> context)
         {
             FutureConsumeContext<TInput> consumeContext = context.CreateFutureConsumeContext();
 
-            return SendFault(consumeContext);
-        }
-
-        public Task SendFault(FutureConsumeContext<TInput> context)
-        {
-            return context.Instance.HasSubscriptions()
-                ? _endpoint.SendFault(context, context.Instance.Subscriptions.ToArray())
-                : _endpoint.SendFault(context);
-        }
-
-
-        class Default
-        {
+            return consumeContext.Instance.HasSubscriptions()
+                ? _endpoint.SendFault(consumeContext, consumeContext.Instance.Subscriptions.ToArray())
+                : _endpoint.SendFault(consumeContext);
         }
     }
 
@@ -68,22 +53,11 @@ namespace MassTransit.Futures.Endpoints
         ISpecification
         where TFault : class
     {
-        static readonly Default _default = new Default();
         IFaultEndpoint _endpoint;
 
         public FutureFault()
         {
-            _endpoint = new InitializerFaultEndpoint<TFault>(DefaultProvider);
-        }
-
-        public AsyncFutureMessageFactory<TFault> Factory
-        {
-            set => _endpoint = new FactoryFaultEndpoint<TFault>(value);
-        }
-
-        public InitializerValueProvider Initializer
-        {
-            set => _endpoint = new InitializerFaultEndpoint<TFault>(value);
+            _endpoint = new InitializerFaultEndpoint<TFault>(FutureConfiguratorHelpers.DefaultProvider);
         }
 
         public IEnumerable<ValidationResult> Validate()
@@ -92,28 +66,23 @@ namespace MassTransit.Futures.Endpoints
                 yield return this.Failure("Fault", "Factory", "Init or Create must be configured");
         }
 
-        static object DefaultProvider(FutureConsumeContext context)
+        public void SetFaultedUsingFactory(AsyncFutureMessageFactory<TFault> value)
         {
-            return _default;
+            _endpoint = new FactoryFaultEndpoint<TFault>(value);
+        }
+
+        public void SetFaultedUsingInitializer(InitializerValueProvider value)
+        {
+            _endpoint = new InitializerFaultEndpoint<TFault>(value);
         }
 
         public Task SetFaulted(BehaviorContext<FutureState> context)
         {
             var consumeContext = context.CreateFutureConsumeContext();
 
-            return SendFault(consumeContext, consumeContext.Instance.Subscriptions.ToArray());
-        }
-
-        public Task SendFault(FutureConsumeContext context, params FutureSubscription[] subscriptions)
-        {
-            return context.Instance.HasSubscriptions()
-                ? _endpoint.SendFault(context, subscriptions)
-                : _endpoint.SendFault(context);
-        }
-
-
-        class Default
-        {
+            return consumeContext.Instance.HasSubscriptions()
+                ? _endpoint.SendFault(consumeContext, consumeContext.Instance.Subscriptions.ToArray())
+                : _endpoint.SendFault(consumeContext);
         }
     }
 }

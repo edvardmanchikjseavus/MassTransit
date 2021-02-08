@@ -1,74 +1,82 @@
 namespace MassTransit.Futures.Configurators
 {
     using System;
+    using System.Collections.Generic;
+    using System.Threading.Tasks;
+    using Automatonymous;
     using Endpoints;
+    using GreenPipes;
 
 
-    public class FutureResponseConfigurator<TRequest, TInput, TResponse> :
-        IFutureResponseConfigurator<TInput, TResponse>
-        where TRequest : class
-        where TInput : class
-        where TResponse : class
-    {
-        readonly FutureResponse<TRequest, TInput, TResponse> _response;
-
-        public FutureResponseConfigurator(FutureResponse<TRequest, TInput, TResponse> response)
-        {
-            _response = response;
-        }
-
-        /// <summary>
-        /// Sets the response object initializer, along with an object provider to initialize the message
-        /// </summary>
-        /// <param name="provider"></param>
-        public void Init(InitializerValueProvider<TInput> provider)
-        {
-            if (provider == null)
-                throw new ArgumentNullException(nameof(provider));
-
-            _response.Initializer = provider;
-        }
-
-        public void Create(AsyncFutureMessageFactory<TInput, TResponse> factory)
-        {
-            if (factory == null)
-                throw new ArgumentNullException(nameof(factory));
-
-            _response.Factory = factory;
-        }
-    }
-
-
-    public class FutureResponseConfigurator<TRequest, TResponse> :
-        IFutureResponseConfigurator<TResponse>
+    public class FutureResponseConfigurator<TCommand, TResult, TFault, TRequest, TResponse> :
+        FutureResponseHandle<TCommand, TResult, TFault, TRequest, TResponse>,
+        IFutureResponseConfigurator<TResult, TResponse>,
+        ISpecification
+        where TCommand : class
+        where TResult : class
+        where TFault : class
         where TRequest : class
         where TResponse : class
     {
-        readonly FutureResponse<TRequest, TResponse> _response;
+        readonly FutureRequestHandle<TCommand, TResult, TFault, TRequest> _request;
+        FutureResult<TCommand, TResponse, TResult> _result;
 
-        public FutureResponseConfigurator(FutureResponse<TRequest, TResponse> response)
+        public FutureResponseConfigurator(Event<TResponse> completed, FutureRequestHandle<TCommand, TResult, TFault, TRequest> request)
         {
-            _response = response;
+            _request = request;
+
+            Completed = completed;
         }
 
-        /// <summary>
-        /// Sets the response object initializer, along with an object provider to initialize the message
-        /// </summary>
-        /// <param name="provider"></param>
-        public void Init(InitializerValueProvider provider)
-        {
-            if (provider == null)
-                throw new ArgumentNullException(nameof(provider));
+        public PendingIdProvider<TResponse> PendingResponseIdProvider { get; private set; }
 
-            _response.Initializer = provider;
+        public Event<TResponse> Completed { get; }
+
+        public Event<Fault<TRequest>> Faulted => _request.Faulted;
+
+        public FutureResponseHandle<TCommand, TResult, TFault, TRequest, T> OnResponseReceived<T>(
+            Action<IFutureResponseConfigurator<TResult, T>> configure = default)
+            where T : class
+        {
+            return _request.OnResponseReceived(configure);
         }
 
-        public void Create(AsyncFutureMessageFactory<TResponse> factory)
+        public void CompletePendingRequest(PendingIdProvider<TResponse> provider)
         {
-            if (factory == null)
-                throw new ArgumentNullException(nameof(factory));
+            PendingResponseIdProvider = provider;
+        }
 
-            _response.Factory = factory;
+        public void SetCompletedUsingFactory(FutureMessageFactory<TResponse, TResult> factoryMethod)
+        {
+            GetResultConfigurator().SetCompletedUsingFactory(factoryMethod);
+        }
+
+        public void SetCompletedUsingFactory(AsyncFutureMessageFactory<TResponse, TResult> factoryMethod)
+        {
+            GetResultConfigurator().SetCompletedUsingFactory(factoryMethod);
+        }
+
+        public void SetCompletedUsingInitializer(InitializerValueProvider<TResponse> valueProvider)
+        {
+            GetResultConfigurator().SetCompletedUsingInitializer(valueProvider);
+        }
+
+        public IEnumerable<ValidationResult> Validate()
+        {
+            yield break;
+        }
+
+        public Task SetResult(BehaviorContext<FutureState, TResponse> context)
+        {
+            return _result.SetResult(context);
+        }
+
+        IFutureResultConfigurator<TResult, TResponse> GetResultConfigurator()
+        {
+            _result ??= new FutureResult<TCommand, TResponse, TResult>();
+
+            var configurator = new FutureResultConfigurator<TCommand, TResult, TResponse>(_result);
+            return configurator;
         }
     }
 }

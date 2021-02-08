@@ -2,26 +2,43 @@ namespace MassTransit.Futures
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using Courier;
-    using Internals;
+    using Metadata;
     using Util;
 
 
     public class FutureMessage
     {
-        public FutureMessage(Guid typeId, IDictionary<string, object> message)
+        public FutureMessage(IDictionary<string, object> message, string[] supportedMessageTypes)
         {
-            TypeId = typeId;
             Message = message;
+            SupportedMessageTypes = supportedMessageTypes;
         }
 
         public IDictionary<string, object> Message { get; private set; }
-        public Guid TypeId { get; private set; }
+
+        public string[] SupportedMessageTypes { get; private set; }
+
+        public bool HasMessageType(Type messageType)
+        {
+            var typeUrn = MessageUrn.ForTypeString(messageType);
+
+            return SupportedMessageTypes?.Any(x => typeUrn.Equals(x, StringComparison.OrdinalIgnoreCase)) ?? false;
+        }
+
+        public bool HasMessageType<T>()
+            where T : class
+        {
+            var typeUrn = MessageUrn.ForTypeString<T>();
+
+            return SupportedMessageTypes?.Any(x => typeUrn.Equals(x, StringComparison.OrdinalIgnoreCase)) ?? false;
+        }
 
         public T ToObject<T>()
             where T : class
         {
-            return ObjectTypeDeserializer.Deserialize<T>(Message);
+            return Message != null ? ObjectTypeDeserializer.Deserialize<T>(Message) : null;
         }
     }
 
@@ -31,9 +48,8 @@ namespace MassTransit.Futures
         where T : class
     {
         public FutureMessage(T result)
-            : base(FutureMetadataCache<T>.TypeId, SerializerCache.GetObjectAsDictionary(result))
+            : base(SerializerCache.GetObjectAsDictionary(result), TypeMetadataCache<T>.MessageTypeNames)
         {
-            // TODO change to capture entire message from ConsumeContext with SupportedMessageTypes
         }
     }
 }

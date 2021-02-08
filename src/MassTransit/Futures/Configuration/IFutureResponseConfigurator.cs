@@ -1,37 +1,15 @@
 namespace MassTransit.Futures
 {
-    public interface IFutureResponseConfigurator<out TResult, TResponse>
+    public interface IFutureResponseConfigurator<TResult, out TResponse> :
+        IFutureResultConfigurator<TResult, TResponse>
         where TResult : class
         where TResponse : class
     {
         /// <summary>
-        /// Adds an object initializer to the command, on top of the <see cref="FutureState" /> and <typeparamref name="TResult" />
-        /// which are added automatically.
+        /// If specified, the identifier is used to complete a pending result and the result will be stored
+        /// in the future.
         /// </summary>
-        /// <param name="provider"></param>
-        void Init(InitializerValueProvider<TResult> provider);
-
-        /// <summary>
-        /// Replaces the command initializer with a custom message factory
-        /// </summary>
-        /// <param name="factory"></param>
-        void Create(AsyncFutureMessageFactory<TResult, TResponse> factory);
-    }
-
-
-    public interface IFutureResponseConfigurator<TResponse>
-        where TResponse : class
-    {
-        /// <summary>
-        /// Adds an object initializer to the command, on top of the <see cref="FutureState" /> which is added automatically.
-        /// </summary>
-        /// <param name="provider"></param>
-        void Init(InitializerValueProvider provider);
-
-        /// <summary>
-        /// Replaces the command initializer with a custom message factory
-        /// </summary>
-        /// <param name="factory"></param>
-        void Create(AsyncFutureMessageFactory<TResponse> factory);
+        /// <param name="provider">Provides the identifier from the request</param>
+        void CompletePendingRequest(PendingIdProvider<TResponse> provider);
     }
 }

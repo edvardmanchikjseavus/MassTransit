@@ -1,9 +1,8 @@
-namespace MassTransit.Futures
+namespace MassTransit
 {
     using System;
     using System.Runtime.Serialization;
     using GreenPipes.Internals.Extensions;
-    using MassTransit;
 
 
     [Serializable]

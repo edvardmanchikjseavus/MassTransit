@@ -1,34 +1,10 @@
 namespace MassTransit.Futures.Internals
 {
     using System;
-    using System.Collections.Concurrent;
     using System.Security.Cryptography;
     using System.Text;
     using System.Threading;
     using GreenPipes.Internals.Extensions;
-
-
-    public static class FutureMetadataCache
-    {
-        static class Cached
-        {
-            internal static readonly ConcurrentDictionary<Type, CachedType> Instance = new ConcurrentDictionary<Type, CachedType>();
-        }
-
-
-        interface CachedType
-        {
-            Guid TypeId { get; }
-        }
-
-
-        class CachedType<T> :
-            CachedType
-            where T : class
-        {
-            public Guid TypeId => FutureMetadataCache<T>.TypeId;
-        }
-    }
 
 
     interface IFutureMetadataCache<T>

@@ -9,12 +9,13 @@ namespace MassTransit.Containers.Tests.FutureScenarios.Futures
     {
         public OnionRingsFuture()
         {
-            Event(() => FutureRequested, x => x.CorrelateById(context => context.Message.OrderLineId));
+            ConfigureCommand(x => x.CorrelateById(context => context.Message.OrderLineId));
 
-            SendRequest<CookOnionRings, OnionRingsReady>(x =>
-            {
-                x.Response(r => r.Init(context => new {Description = $"{context.Message.Quantity} Onion Rings"}));
-            });
+            SendRequest<CookOnionRings>()
+                .OnResponseReceived<OnionRingsReady>(x =>
+                {
+                    x.SetCompletedUsingInitializer(context => new {Description = $"{context.Message.Quantity} Onion Rings"});
+                });
         }
     }
 }

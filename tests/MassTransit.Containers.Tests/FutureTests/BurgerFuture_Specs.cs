@@ -75,6 +75,7 @@ namespace MassTransit.Containers.Tests.FutureTests
             catch (RequestFaultException exception)
             {
                 Assert.That(exception.Fault.Host, Is.Not.Null);
+                Assert.That(exception.Fault.Exceptions, Is.Not.Null.Or.Empty);
                 Assert.That(exception.Message, Contains.Substring("lettuce"));
             }
         }

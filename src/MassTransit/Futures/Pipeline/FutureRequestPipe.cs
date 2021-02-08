@@ -6,14 +6,14 @@ namespace MassTransit.Futures.Pipeline
     using Util;
 
 
-    class FutureCommandPipe<T> :
+    class FutureRequestPipe<T> :
         IPipe<SendContext<T>>
         where T : class
     {
         readonly Guid _requestId;
         readonly Uri _responseAddress;
 
-        public FutureCommandPipe(Uri responseAddress, Guid requestId)
+        public FutureRequestPipe(Uri responseAddress, Guid requestId)
         {
             _responseAddress = responseAddress;
             _requestId = requestId;
@@ -29,7 +29,7 @@ namespace MassTransit.Futures.Pipeline
 
         public void Probe(ProbeContext context)
         {
-            context.CreateFilterScope(nameof(FutureResponsePipe<T>));
+            context.CreateFilterScope(nameof(FutureRequestPipe<T>));
         }
     }
 }

@@ -1,11 +1,10 @@
 namespace MassTransit.Futures
 {
     using System;
-    using MassTransit;
     using MassTransit.Internals.Extensions;
-    using MassTransit.Registration;
     using NewIdFormatters;
     using NewIdParsers;
+    using Registration;
 
 
     public readonly struct FutureLocation

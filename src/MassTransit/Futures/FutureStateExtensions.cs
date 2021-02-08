@@ -1,16 +1,26 @@
 namespace MassTransit.Futures
 {
     using System;
+    using System.Collections.Generic;
+    using System.Linq;
     using System.Threading.Tasks;
     using Automatonymous;
 
 
     public static class FutureStateExtensions
     {
-        public static T GetRequest<T>(this FutureState future)
+        public static T GetCommand<T>(this FutureState future)
             where T : class
         {
             return future.Request?.ToObject<T>();
+        }
+
+        public static IEnumerable<T> SelectResults<T>(this FutureConsumeContext context)
+            where T : class
+        {
+            return context.Instance.HasResults()
+                ? context.Instance.Results.Where(x => x.Value.HasMessageType<T>()).Select(x => x.Value.ToObject<T>())
+                : Enumerable.Empty<T>();
         }
 
         public static void AddSubscription(this FutureConsumeContext context)
@@ -157,6 +167,16 @@ namespace MassTransit.Futures
                 result = message.ToObject<T>();
                 return result != default;
             }
+
+            result = default;
+            return false;
+        }
+
+        public static bool TryGetVariable<T>(this FutureState future, string key, out T result)
+            where T : class
+        {
+            if (future.HasVariables())
+                return future.Variables.TryGetValue(key, out result);
 
             result = default;
             return false;

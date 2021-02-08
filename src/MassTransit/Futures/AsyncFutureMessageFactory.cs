@@ -7,18 +7,18 @@ namespace MassTransit.Futures
     /// Given the event context and request, returns an object used to complete the initialization of the object type
     /// </summary>
     /// <param name="context"></param>
+    /// <typeparam name="TInput"></typeparam>
     /// <typeparam name="TMessage"></typeparam>
-    /// <typeparam name="T"></typeparam>
-    public delegate Task<T> AsyncFutureMessageFactory<in TMessage, T>(FutureConsumeContext<TMessage> context)
-        where TMessage : class
-        where T : class;
+    public delegate Task<TMessage> AsyncFutureMessageFactory<in TInput, TMessage>(FutureConsumeContext<TInput> context)
+        where TInput : class
+        where TMessage : class;
 
 
     /// <summary>
     /// Given the event context and request, returns an object used to complete the initialization of the object type
     /// </summary>
     /// <param name="context"></param>
-    /// <typeparam name="T"></typeparam>
-    public delegate Task<T> AsyncFutureMessageFactory<T>(FutureConsumeContext context)
-        where T : class;
+    /// <typeparam name="TMessage"></typeparam>
+    public delegate Task<TMessage> AsyncFutureMessageFactory<TMessage>(FutureConsumeContext context)
+        where TMessage : class;
 }

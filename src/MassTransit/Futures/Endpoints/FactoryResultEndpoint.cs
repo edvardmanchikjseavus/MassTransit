@@ -4,14 +4,14 @@ namespace MassTransit.Futures.Endpoints
     using Internals;
 
 
-    public class FactoryResponseEndpoint<TResult, TResponse> :
-        IResponseEndpoint<TResult>
+    public class FactoryResultEndpoint<TResult, TResponse> :
+        IResultEndpoint<TResult>
         where TResult : class
         where TResponse : class
     {
         readonly AsyncFutureMessageFactory<TResult, TResponse> _factory;
 
-        public FactoryResponseEndpoint(AsyncFutureMessageFactory<TResult, TResponse> factory)
+        public FactoryResultEndpoint(AsyncFutureMessageFactory<TResult, TResponse> factory)
         {
             _factory = factory;
         }
@@ -25,13 +25,13 @@ namespace MassTransit.Futures.Endpoints
     }
 
 
-    public class FactoryResponseEndpoint<TResponse> :
-        IResponseEndpoint
+    public class FactoryResultEndpoint<TResponse> :
+        IResultEndpoint
         where TResponse : class
     {
         readonly AsyncFutureMessageFactory<TResponse> _factory;
 
-        public FactoryResponseEndpoint(AsyncFutureMessageFactory<TResponse> factory)
+        public FactoryResultEndpoint(AsyncFutureMessageFactory<TResponse> factory)
         {
             _factory = factory;
         }

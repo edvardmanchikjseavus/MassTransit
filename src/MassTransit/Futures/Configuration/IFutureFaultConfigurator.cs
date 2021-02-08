@@ -5,17 +5,23 @@ namespace MassTransit.Futures
         where TFault : class
     {
         /// <summary>
-        /// Adds an object initializer to the command, on top of the <see cref="FutureState" /> and <typeparamref name="TInput" />
-        /// which are added automatically.
+        /// Fault the future using the specified factory method
         /// </summary>
-        /// <param name="provider"></param>
-        void Init(InitializerValueProvider<TInput> provider);
+        /// <param name="factoryMethod">Returns the result</param>
+        void SetFaultedUsingFactory(FutureMessageFactory<TInput, TFault> factoryMethod);
 
         /// <summary>
-        /// Replaces the command initializer with a custom message factory
+        /// Fault the future using the specified factory method
         /// </summary>
-        /// <param name="factory"></param>
-        void Create(AsyncFutureMessageFactory<TInput, TFault> factory);
+        /// <param name="factoryMethod">Returns the result</param>
+        void SetFaultedUsingFactory(AsyncFutureMessageFactory<TInput, TFault> factoryMethod);
+
+        /// <summary>
+        /// Fault the future using the a message initializer. The initiating command is also used to initialize
+        /// result properties prior to apply the values specified.
+        /// </summary>
+        /// <param name="valueProvider">Returns an object of values to initialize the result</param>
+        void SetFaultedUsingInitializer(InitializerValueProvider<TInput> valueProvider);
     }
 
 
@@ -23,16 +29,22 @@ namespace MassTransit.Futures
         where TFault : class
     {
         /// <summary>
-        /// Adds an object initializer to the command, on top of the <see cref="FutureState" /> and <typeparamref name="TInput" />
-        /// which are added automatically.
+        /// Fault the future using the specified factory method
         /// </summary>
-        /// <param name="provider"></param>
-        void Init(InitializerValueProvider provider);
+        /// <param name="factoryMethod">Returns the result</param>
+        void SetFaultedUsingFactory(FutureMessageFactory<TFault> factoryMethod);
 
         /// <summary>
-        /// Replaces the command initializer with a custom message factory
+        /// Fault the future using the specified factory method
         /// </summary>
-        /// <param name="factory"></param>
-        void Create(AsyncFutureMessageFactory<TFault> factory);
+        /// <param name="factoryMethod">Returns the result</param>
+        void SetFaultedUsingFactory(AsyncFutureMessageFactory<TFault> factoryMethod);
+
+        /// <summary>
+        /// Fault the future using the a message initializer. The initiating command is also used to initialize
+        /// result properties prior to apply the values specified.
+        /// </summary>
+        /// <param name="valueProvider">Returns an object of values to initialize the result</param>
+        void SetFaultedUsingInitializer(InitializerValueProvider valueProvider);
     }
 }

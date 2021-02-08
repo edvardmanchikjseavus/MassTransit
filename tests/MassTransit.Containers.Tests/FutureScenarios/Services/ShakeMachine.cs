@@ -1,5 +1,6 @@
 namespace MassTransit.Containers.Tests.FutureScenarios.Services
 {
+    using System;
     using System.Threading.Tasks;
     using Contracts;
 
@@ -7,7 +8,23 @@ namespace MassTransit.Containers.Tests.FutureScenarios.Services
     public class ShakeMachine :
         IShakeMachine
     {
-        public async Task PourShake(string flavor, Size size)
+        public Task PourShake(string flavor, Size size)
+        {
+            if (flavor.Equals("strawberry", StringComparison.InvariantCultureIgnoreCase))
+            {
+                throw new ShakeMachineException("Strawberry is not available");
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+
+    public class ShakeMachineException :
+        Exception
+    {
+        public ShakeMachineException(string message)
+            : base(message)
         {
         }
     }
